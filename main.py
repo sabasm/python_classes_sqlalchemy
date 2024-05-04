@@ -86,24 +86,50 @@ class Animal(Base):
     favorite_toy = relationship(CLASSES.toy)
     owner = relationship(CLASSES.owner)
 
-# Set up the database engine and create all tables
-engine = create_engine(DATABASE_URL)
-Base.metadata.create_all(engine)
-Session = sessionmaker(bind=engine)
-session = Session()
+class DatabaseManager:
+    """Database manager class for handling database operations."""
+
+    def __init__(self):
+        self.engine = create_engine(DATABASE_URL)
+        self.Base = Base
+        self.Session = sessionmaker(bind=self.engine)
+        self.session = self.Session()
+
+    def add_entity(self, entity):
+        """Add an entity to the database."""
+        self.session.add(entity)
+        self.session.commit()
+
+    def query_entity_by_id(self, entity_class, entity_id):
+        """Query an entity by its ID."""
+        return self.session.query(entity_class).filter_by(id=entity_id).first()
+
+    def close_session(self):
+        """Close the database session."""
+        self.session.close()
 
 if __name__ == '__main__':
-    # Create instances of Toy, Owner, and Animal
-    toy = Toy(id=str(uuid.uuid4()), name="Chew Toy", toy_type="Rubber")
-    owner = Owner(id=str(uuid.uuid4()), name="John Doe", contact_info="john@example.com")
-    baxter = Animal(id=str(uuid.uuid4()), name="Baxter", age=5, favorite_toy=toy, owner=owner)
+    try:
+        db_manager = DatabaseManager()
 
-    # Add instances to the session and commit them to the database
-    session.add_all([toy, owner, baxter])
-    session.commit()
+        # Create instances of Toy, Owner, and Animal
+        toy = Toy(id=str(uuid.uuid4()), name="Chew Toy", toy_type="Rubber")
+        owner = Owner(id=str(uuid.uuid4()), name="John Doe", contact_info="john@example.com")
+        baxter = Animal(id=str(uuid.uuid4()), name="Baxter", age=5, favorite_toy=toy, owner=owner)
 
-    # Query the database for an Animal named 'Baxter' and display its information
-    queried_animal = session.query(Animal).filter_by(name="Baxter").first()
-    print(f"Animal ID: {queried_animal.id}, Name: {queried_animal.name}, Age: {queried_animal.age}")
+        # Add instances to the database
+        db_manager.add_entity(toy)
+        db_manager.add_entity(owner)
+        db_manager.add_entity(baxter)
 
-    session.close()  # Close the session
+        # Query the database for an Animal named 'Baxter' and display its information
+        queried_animal = db_manager.query_entity_by_id(Animal, baxter.id)
+        if queried_animal:
+            print(f"Animal ID: {queried_animal.id}, Name: {queried_animal.name}, Age: {queried_animal.age}")
+        else:
+            print("Animal not found.")
+
+    except Exception as e:
+        print(f"An error occurred: {str(e)}")
+    finally:
+        db_manager.close_session()  # Close the session
