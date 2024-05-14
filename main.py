@@ -5,6 +5,8 @@ from abc import ABC, abstractmethod
 from collections import namedtuple
 from sqlalchemy import create_engine, Column, String, Integer, ForeignKey
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
+from sqlalchemy.exc import SQLAlchemyError
+from contextlib import contextmanager
 from dotenv import load_dotenv
 
 # Load environment variables from a .env file
@@ -91,9 +93,29 @@ class DatabaseManager:
 
     def __init__(self):
         self.engine = create_engine(DATABASE_URL)
-        self.Base = Base
         self.Session = sessionmaker(bind=self.engine)
-        self.session = self.Session()
+        # Create all tables
+        Base.metadata.create_all(self.engine)
+
+    @contextmanager
+    def session_scope(self):
+        """Provide a transactional scope around a series of operations."""
+        session = self.Session()
+        try:
+            yield session
+            session.commit()
+        except SQLAlchemyError as e:
+            session.rollback()
+            print(f"Session rollback because of error: {e}")
+            raise
+        finally:
+            session.close()
+
+class Repository:
+    """Repository class for abstracting database operations."""
+
+    def __init__(self, session):
+        self.session = session
 
     def add_entity(self, entity):
         """Add an entity to the database."""
@@ -104,32 +126,53 @@ class DatabaseManager:
         """Query an entity by its ID."""
         return self.session.query(entity_class).filter_by(id=entity_id).first()
 
-    def close_session(self):
-        """Close the database session."""
-        self.session.close()
+    def update_entity(self, entity_class, entity_id, **kwargs):
+        """Update an entity in the database."""
+        entity = self.session.query(entity_class).filter_by(id=entity_id).first()
+        if entity:
+            for key, value in kwargs.items():
+                setattr(entity, key, value)
+            entity.update_timestamp()
+            self.session.commit()
+        else:
+            print(f"Entity with id {entity_id} not found.")
+
+    def delete_entity(self, entity_class, entity_id):
+        """Delete an entity from the database."""
+        entity = self.session.query(entity_class).filter_by(id=entity_id).first()
+        if entity:
+            self.session.delete(entity)
+            self.session.commit()
+        else:
+            print(f"Entity with id {entity_id} not found.")
 
 if __name__ == '__main__':
     try:
         db_manager = DatabaseManager()
 
-        # Create instances of Toy, Owner, and Animal
-        toy = Toy(id=str(uuid.uuid4()), name="Chew Toy", toy_type="Rubber")
-        owner = Owner(id=str(uuid.uuid4()), name="John Doe", contact_info="john@example.com")
-        baxter = Animal(id=str(uuid.uuid4()), name="Baxter", age=5, favorite_toy=toy, owner=owner)
+        with db_manager.session_scope() as session:
+            repository = Repository(session)
 
-        # Add instances to the database
-        db_manager.add_entity(toy)
-        db_manager.add_entity(owner)
-        db_manager.add_entity(baxter)
+            # Create instances of Toy and Owner
+            toy = Toy(id=str(uuid.uuid4()), name="Chew Toy", toy_type="Rubber")
+            owner = Owner(id=str(uuid.uuid4()), name="John Doe", contact_info="john@example.com")
 
-        # Query the database for an Animal named 'Baxter' and display its information
-        queried_animal = db_manager.query_entity_by_id(Animal, baxter.id)
-        if queried_animal:
-            print(f"Animal ID: {queried_animal.id}, Name: {queried_animal.name}, Age: {queried_animal.age}")
-        else:
-            print("Animal not found.")
+            # Add Toy and Owner to the database
+            repository.add_entity(toy)
+            repository.add_entity(owner)
+
+            # Create Animal instance after Toy and Owner are added to the database
+            baxter = Animal(id=str(uuid.uuid4()), name="Baxter", age=5, favorite_toy_id=toy.id, owner_id=owner.id)
+
+            # Add Animal to the database
+            repository.add_entity(baxter)
+
+            # Query the database for an Animal with a specific ID and display its information
+            queried_animal = repository.query_entity_by_id(Animal, baxter.id)
+            if queried_animal:
+                print(f"Animal ID: {queried_animal.id}, Name: {queried_animal.name}, Age: {queried_animal.age}")
+            else:
+                print("Animal not found.")
 
     except Exception as e:
         print(f"An error occurred: {str(e)}")
-    finally:
-        db_manager.close_session()  # Close the session
