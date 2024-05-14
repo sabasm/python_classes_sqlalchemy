@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from .repository_interface import IRepository
+from ..repository_interface import IRepository
 
 class SQLAlchemyRepository(IRepository):
     def __init__(self, session: Session):
